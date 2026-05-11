@@ -4,3 +4,4 @@ wordcloud
 gunicorn
 Pillow
 konlpy
+JPype1==1.4.1
