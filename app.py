@@ -1,20 +1,21 @@
 from flask import Flask, render_template, request, jsonify
 from data_get import get_best_match_content
 from wordcloud import WordCloud
-from konlpy.tag import Okt  # 추가: 한글 형태소 분석기
+from kiwipiepy import Kiwi # Kiwi 사용
 import io
 import base64
 import os
 import re
 
+# Kiwi 초기화 (전역 설정)
+kiwi = Kiwi()
 app = Flask(__name__)
 
-# 1. 커스텀 불용어 리스트 정의
-# 위키백과 등에서 자주 나오지만 의미 없는 단어들을 추가하세요.
+# 1. 커스텀 불용어 리스트
 CUSTOM_STOPWORDS = {
     '있는', '대한', '있으며', '위해', '통해', '하며', '관련', '내용', 
     '때문', '경우', '의해', '그대로', '또한', '하지만', '그리고',
-    '이름', '가지', '여러', '일부', '대해', '가장', '단어', '문장'
+    '이름', '가지', '여러', '일부', '대해', '가장', '단어', '문장', '위키백과'
 }
 
 @app.route('/')
@@ -36,20 +37,27 @@ def generate():
             return jsonify({'success': False, 'error': f"'{query}'에 대한 검색 결과가 없습니다."}), 404
 
         # 2. 텍스트 정제 및 명사 추출
-        # 한글/영문만 남기고 특수문자 제거
-        clean_content = re.sub(r'[^가-힣a-zA-Z\s]', '', content)
+        clean_content = re.sub(r'[^가-힣a-zA-Z\s]', ' ', content) # 특수문자를 공백으로 치환
         
-        okt = Okt()
-        # 명사만 추출하고, 길이가 2글자 이상이며 불용어 리스트에 없는 것만 필터링
-        nouns = [word for word in okt.nouns(clean_content) 
-                 if len(word) > 1 and word not in CUSTOM_STOPWORDS]
+        # Kiwi를 이용한 형태소 분석
+        # tokenize: 텍스트를 형태소 단위로 분리
+        tokens = kiwi.tokenize(clean_content)
         
-        # 워드클라우드에 넣을 수 있도록 다시 공백으로 합침
+        # 명사(NNG, NNP)만 추출 + 2글자 이상 + 불용어 제외
+        nouns = [
+            t.form for t in tokens 
+            if t.tag in ('NNG', 'NNP') and len(t.form) > 1 and t.form not in CUSTOM_STOPWORDS
+        ]
+        
         final_text = ' '.join(nouns)
 
-        # 3. 워드클라우드 설정
-        font_path = 'NanumGothic.ttf'
+        # 3. 워드클라우드 설정 (Render 환경 고려)
+        # 프로젝트 루트에 NanumGothic.ttf가 있다고 가정
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        font_path = os.path.join(base_dir, 'NanumGothic.ttf')
+        
         if not os.path.exists(font_path):
+            # 로컬 윈도우 환경용 백업
             font_path = r'C:\Windows\Fonts\malgun.ttf'
             if not os.path.exists(font_path):
                 font_path = None
@@ -59,12 +67,12 @@ def generate():
             background_color='white',
             width=800,
             height=400,
-            max_words=100, # 핵심 단어 위주로 보이게 숫자를 조금 줄였습니다.
+            max_words=150,
             colormap='viridis'
         )
 
         # 4. 이미지 생성
-        if not final_text.strip(): # 필터링 후 내용이 없는 경우 대비
+        if not final_text.strip():
             return jsonify({'success': False, 'error': '추출된 유효한 단어가 없습니다.'}), 400
             
         wc.generate(final_text)
@@ -81,8 +89,10 @@ def generate():
         })
 
     except Exception as e:
-        print(f"Error generating word cloud: {e}")
-        return jsonify({'success': False, 'error': '서버 오류가 발생했습니다.'}), 500
+        # 구체적인 에러 로그를 서버 터미널에 출력
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': f'서버 오류: {str(e)}'}), 500
 
 if __name__ == '__main__':
     if not os.path.exists('templates'):
