@@ -4,6 +4,8 @@ from wordcloud import WordCloud
 import io
 import base64
 import os
+from collections import Counter
+from konlpy.tag import Okt
 
 app = Flask(__name__)
 
@@ -24,9 +26,19 @@ def generate():
         
         if not title or not content:
             return jsonify({'success': False, 'error': '결과를 찾을 수 없습니다.'}), 404
-
+        okt = Okt()
         # --- 폰트 설정 추가 구간 ---
         # 1. 프로젝트 폴더에 있는 나눔고딕 확인
+        nouns = okt.nouns(content)
+        custom_stopwords = ["위해", "대한", "통해", "관련"]  # 필요한 불용어 추가 가능
+        final_nouns = [
+            word
+            for word in nouns
+            if len(word) > 1 and word not in custom_stopwords
+        ]
+
+        word_counts = Counter(final_nouns)
+        
         font_path = 'NanumGothic.ttf' 
         
         # 2. 파일이 없으면 시스템 기본 폰트 시도 (서버 환경 대응)
@@ -45,7 +57,7 @@ def generate():
             height=400
         )
         
-        wc.generate(content)
+        wc.generate_from_frequencies(word_counts)
         
         img_buffer = io.BytesIO()
         wc.to_image().save(img_buffer, format='PNG')
